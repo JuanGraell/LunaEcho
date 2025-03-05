@@ -1,3 +1,5 @@
 discord.py==2.4.0
 Flask==3.1.0
 requests==2.25.1
+spacy==3.8.3 #pip install spacy
+es_core_news_sm==3.5.0 #python -m spacy download es_core_news_sm
