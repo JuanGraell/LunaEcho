@@ -121,7 +121,7 @@ async def on_message(message):
                 channel_type = types_channels[token.lemma_]
         
         # Extraer nombres de canal o categoría usando expresiones regulares
-        match_name = re.search(r"(llamado|con el nombre|denominado)\s+[\"']([^\"']+)[\"']", message.content)
+        match_name = re.search(r"(nombre|llamado|denominado)\s+['\"]([^'\"]+)['\"]", message.content, re.IGNORECASE)
         if match_name:
             channel_name = match_name.group(2).replace(" ", "-")
             name_channel_status = True
