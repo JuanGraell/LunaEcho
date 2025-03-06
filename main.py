@@ -8,7 +8,6 @@ from spacy.matcher import Matcher
 from rapidfuzz import process, fuzz
 from typing import Optional, Dict, Set, Any
 import spacy
-import re
 import aiohttp
 
 # Token de Discord
