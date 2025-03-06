@@ -4,6 +4,7 @@ import os
 import webserver
 import spacy
 import re
+import aiohttp
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -25,7 +26,7 @@ async def set_channel(ctx, channel: discord.TextChannel):
     global listening_channel_id
     listening_channel_id = channel.id
     await ctx.send(f"Canal de escucha configurado a: {channel.mention}")
-    await ctx.send("Recuerda que si quieres dar ordenes, los nombres de canales, categorias y roles deben ir entre comillas.")
+    await ctx.send("Recuerda que si quieres dar órdenes, los nombres de canales, categorías y roles deben ir entre comillas.")
 
 # Comando de unset_channel
 @bot.command(description="Deja de escuchar en el canal configurado")
@@ -71,7 +72,7 @@ async def on_ready():
         print(f"Error al sincronizar comandos de barra: {e}")
 
 # Escuchar mensajes
-is_creating_channel, name_channel_status, name_category_status  = False, False, False
+is_creating_channel, name_channel_status, name_category_status = False, False, False
 
 @bot.event
 async def on_message(message):
@@ -88,23 +89,26 @@ async def on_message(message):
         # Lógica para crear canales y categorías, y eliminar canales y categorías
 
         keywords_saludar = {"hola", "bot", "buenas", "saludos", "hey", "hello", "hi", "holi", "holis", "holu", "holus", "holaa", "holaaa", "holaaaas", "holaaaaas", "holaaaaaas", "holaaaaaa"}
-        keywords_crearcanales = {"crea","crear", "abrir", "generar", "hacer", "iniciar", "nuevo", "canal"}
-        keywords_crearcategorias = {"crear", "abrir", "generar", "nueva", "categoría", "categoria"}
+        keywords_crear = {"crea", "crear", "abrir", "generar", "hacer", "iniciar", "nuevo"}
+        keywords_canal = {"canal", "chat", "texto", "voz", "audio", "llamada", "hablar"}
+        keywords_categoria = {"categoría", "categoria"}
         keywords_eliminar = {"eliminar", "borrar", "quitar", "remover", "suprimir"}
-        types_channels = {"texto": "text",
-                 "chat": "text",
-                 "chatear":"text",
-                 "mensaje": "text",
-                 "mensajes": "text",
-                 "voz": "voice",
-                 "audio": "voice",
-                 "llamada": "voice",
-                 "hablar": "voice",
-                }
-        
+        keywords_en = {"en", "dentro", "categoría", "categoria"}  # Palabras clave para identificar categorías
+        types_channels = {
+            "texto": "text",
+            "chat": "text",
+            "chatear": "text",
+            "mensaje": "text",
+            "mensajes": "text",
+            "voz": "voice",
+            "audio": "voice",
+            "llamada": "voice",
+            "hablar": "voice",
+        }
+
         channel_name = None
         category_name = None
-        channel_type = "text" #Predeterminado a texto
+        channel_type = "text"  # Predeterminado a texto
         intent = None
 
         # Tokenizar el mensaje
@@ -113,29 +117,97 @@ async def on_message(message):
                 await message.channel.send(f"Hola, {message.author.mention}! ¿En qué puedo ayudarte?")
             if token.lemma_ in keywords_eliminar:
                 intent = "eliminar"  # Priorizar la intención de eliminar
-            if token.lemma_ in keywords_crearcanales and intent != "eliminar":
+            if token.lemma_ in keywords_crear and intent != "eliminar":
+                intent = "crear"
+            if token.lemma_ in keywords_canal and intent == "crear":
                 intent = "crear_canal"
-            if token.lemma_ in keywords_crearcategorias and intent != "eliminar":
+            if token.lemma_ in keywords_categoria and intent == "crear":
                 intent = "crear_categoria"
             if token.lemma_ in types_channels:
                 channel_type = types_channels[token.lemma_]
-        
+
         # Extraer nombres de canal o categoría usando expresiones regulares
-        match_name = re.search(r"(llamado|con el nombre|denominado)\s+[\"']([^\"']+)[\"']", message.content)
+        match_name = re.search(r"(llamado|llamada|con el nombre|denominado)\s+[\"']([^\"']+)[\"']", message.content)
         if match_name:
             channel_name = match_name.group(2).replace(" ", "-")
             name_channel_status = True
 
-        match_category = re.search(r"(categor[ií]a|en)\s+[\"']([^\"']+)[\"']", message.content, re.IGNORECASE)
+        match_category = re.search(r"(categor[ií]a|en|dentro)\s+[\"']([^\"']+)[\"']", message.content, re.IGNORECASE)
         if match_category:
             category_name = match_category.group(2)
             name_category_status = True
-                
+
+        # Si solo se escribe "crear", preguntar qué se desea crear
+        if intent == "crear" and not any(token.lemma_ in keywords_canal or token.lemma_ in keywords_categoria for token in doc):
+            await message.channel.send("¿Qué deseas crear? Escribe `crear canal` o `crear categoría`.")
+            return
+
+        # Crear canal en una categoría en un solo mensaje
+        if intent == "crear_canal":
+            if not channel_name:
+                await message.channel.send("No pude identificar el nombre del canal.\n¿Cómo quieres que se llame el canal? (Escribe el nombre entre comillas)")
+
+                try:
+                    response = await bot.wait_for(
+                        "message",
+                        timeout=30.0,  # Espera 30 segundos
+                        check=lambda m: m.author == message.author and m.channel == message.channel
+                    )
+                    channel_name = response.content.replace(" ", "-")
+                except:
+                    await message.channel.send("No recibí un nombre. Operación cancelada.")
+                    name_channel_status = False
+                    name_category_status = False
+                    return
+
+            if not category_name:
+                categoriesName = {c.name.lower(): c for c in guild.categories}
+                categories_display = [f"{c.name}" for c in guild.categories]
+                category_list = "(Sin categoría, " + ", ".join(categories_display) + ")"
+                await message.channel.send(f"No pude identificar el nombre de la categoría. \nEscribe el nombre EXACTO de la categoría donde deseas crear el canal:\n{category_list}")
+                try:
+                    response = await bot.wait_for("message", timeout=30.0, check=lambda m: m.author == message.author)
+                    category_response = response.content.strip().lower()
+
+                    if category_response in ("sin categoría", "sin categoria"):
+                        category = None
+                    else:
+                        category = categoriesName.get(category_response)
+                        if category is None:
+                            await message.channel.send("⚠️ Categoría no encontrada. Se creará el canal sin categoría.")
+                    name_category_status = True
+
+                except:
+                    await message.channel.send("⏱️ No recibí una respuesta válida. Se creará el canal sin categoría.")
+                    category = None
+                    name_category_status = True
+            else:
+                categoriesName = {c.name.lower(): c for c in guild.categories}
+                category = categoriesName.get(category_name.lower())
+                if category is None:
+                    await message.channel.send(f"⚠️ Categoría '{category_name}' no encontrada. Se creará el canal sin categoría.")
+                    category = None
+
+            if channel_type == "text":
+                new_channel = await guild.create_text_channel(channel_name, category=category)
+                tipoCanal = "texto"
+            else:
+                new_channel = await guild.create_voice_channel(channel_name, category=category)
+                tipoCanal = "voz"
+
+            category_name = category.name if category else "Sin categoría"
+            try:
+                await message.channel.send(f"Se creó el canal de {tipoCanal} en la categoría {category_name}. \n<< {new_channel.mention} >>")
+            except aiohttp.ClientOSError as e:
+                print(f"Error de conexión SSL: {e}")
+            name_channel_status, name_category_status = False, False
+            return
+
         # Crear canal
         if intent == "crear_canal":
             if not channel_name and not name_channel_status:
                 await message.channel.send("No pude identificar el nombre del canal.\n¿Cómo quieres que se llame el canal? (Escribe el nombre entre comillas)")
-                
+
                 try:
                     response = await bot.wait_for(
                         "message",
@@ -164,7 +236,7 @@ async def on_message(message):
                     try:
                         response = await bot.wait_for("message", timeout=30.0, check=lambda m: m.author == message.author)
                         category_response = response.content.strip().lower()
-                        
+
                         if category_response in ("sin categoría", "sin categoria"):
                             category = None
                         else:
@@ -173,7 +245,7 @@ async def on_message(message):
                             if category is None:
                                 await message.channel.send("⚠️ Categoría no encontrada. Se creará el canal sin categoría.")
                         name_category_status = True
-                        
+
                     except:
                         await message.channel.send("⏱️ No recibí una respuesta válida. Se creará el canal sin categoría.")
                         category = None
@@ -181,12 +253,16 @@ async def on_message(message):
 
             if channel_type == "text":
                 new_channel = await guild.create_text_channel(channel_name, category=category)
-                tipoCanal="texto"
+                tipoCanal = "texto"
             else:
                 new_channel = await guild.create_voice_channel(channel_name, category=category)
-                tipoCanal="voz"
+                tipoCanal = "voz"
 
-            await message.channel.send(f"Se creo el canal de {tipoCanal} en la categoria {category}. \n<< {new_channel.mention} >>")
+            category_name = category.name if category else "Sin categoría"
+            try:
+                await message.channel.send(f"Se creó el canal de {tipoCanal} en la categoría {category_name}. \n<< {new_channel.mention} >>")
+            except aiohttp.ClientOSError as e:
+                print(f"Error de conexión SSL: {e}")
             name_channel_status, name_category_status = False, False
 
         # Crear categoría
@@ -214,7 +290,7 @@ async def on_message(message):
             if match_delete:
                 target_type = match_delete.group(1).lower()  # "canal" o "categoría"
                 target_name = match_delete.group(2).strip()  # Nombre del canal o categoría
-                
+
                 if target_type == "canal":
                     channel = discord.utils.get(guild.channels, name=target_name)
                     if channel:
@@ -239,7 +315,7 @@ async def on_message(message):
 async def set_channel_slash(interaction: discord.Interaction, channel: discord.TextChannel):
     global listening_channel_id
     listening_channel_id = channel.id
-    await interaction.response.send_message(f"Canal de escucha configurado a: {channel.mention}.\nRecuerda que si quieres dar ordenes, los nombres de canales, categorias y roles deben ir entre comillas.")
+    await interaction.response.send_message(f"Canal de escucha configurado a: {channel.mention}.\nRecuerda que si quieres dar órdenes, los nombres de canales, categorías y roles deben ir entre comillas.")
 
 @bot.tree.command(name="unset_channel", description="Deja de escuchar en el canal configurado")
 async def unset_channel_slash(interaction: discord.Interaction):
