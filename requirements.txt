@@ -3,5 +3,4 @@ discord.py==2.4.0
 Flask==3.1.0
 requests==2.25.1
 spacy==3.8.3 #pip install spacy
-es_core_news_sm==3.1.0
 rapidfuzz==3.12.2
