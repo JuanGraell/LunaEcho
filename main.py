@@ -567,10 +567,10 @@ async def on_message(message: discord.Message):
     if match_category:
         category_name = match_category.group(2)
 
-    # Si se escribió solo "crear" sin especificar qué, se pregunta
-    if intent == "crear" and not any(token.lemma_ in keywords_canal or token.lemma_ in keywords_categoria for token in doc):
-        await message.channel.send("¿Qué deseas crear? Escribe `crear canal` o `crear categoría`.")
-        return
+    # # Si se escribió solo "crear" sin especificar qué, se pregunta
+    # if intent == "crear" and not any(token.lemma_ in keywords_canal or token.lemma_ in keywords_categoria for token in doc):
+    #     await message.channel.send("¿Qué deseas crear? Escribe `crear canal` o `crear categoría`.")
+    #     return
 
     # Lógica para crear un canal
     if intent == "crear_canal":
